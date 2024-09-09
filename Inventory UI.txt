@@ -1,0 +1,698 @@
+
+local tweenService = game:GetService("TweenService")
+local replicatedStorage = game:GetService("ReplicatedStorage")
+local toolUtility = require(replicatedStorage:WaitForChild("ToolUtility"))
+local screenShake = require(game.ReplicatedStorage.Effects.ScreenShake)
+local uiEffect = require(game.ReplicatedStorage.Effects.UIEffect)
+local easyVisuals = require(game.ReplicatedStorage.Effects.EasyVisuals)
+local gameUtility = require(replicatedStorage.GameUtility)
+
+local inventoryFrame = script.Parent
+
+local closeBtn = inventoryFrame.Close;
+
+local itemBtnTemplate =script.ItemBtnTemplate
+local statTemplate = script.StatTemplate;
+
+local itemPreviewFrame = inventoryFrame.ItemPreview
+local itemPreviewNameText = itemPreviewFrame.Showcase.NameText
+local itemPreviewImage = itemPreviewFrame.Showcase.Icon
+local itemStatFrame = itemPreviewFrame.Stats
+local equipBtn = itemPreviewFrame.Equip.EquipBtn
+local upgradeBtn = itemPreviewFrame.Equip.UpgradeBtn
+
+local singleUseBtn = itemPreviewFrame.PotionUse.SingleUse
+local multipleUsebtn = itemPreviewFrame.PotionUse.MultiUse
+
+local itemCategoryDic = {
+	["Weapon"] = inventoryFrame.Buttons["1_Weapons"],
+	["Hat"] =  inventoryFrame.Buttons["2_Hats"],
+	["Aura"] =  inventoryFrame.Buttons["3_Auras"],
+	["Potion"] =  inventoryFrame.Buttons["4_Potions"],
+}
+
+local currentCategory = nil
+local inventoryData = nil
+
+local player =  game.Players.LocalPlayer
+local playerStats = player:WaitForChild("PlayerStats");
+local magicPower = playerStats:WaitForChild("MagicPower");
+local coins = playerStats:WaitForChild("Coin");
+local crystals = playerStats:WaitForChild("Crystal");
+
+local upgradeItemEvent = replicatedStorage.Events:WaitForChild("UpgradeItem")
+local equipItemEvent = 	replicatedStorage.Events:WaitForChild("EquipItem")
+local requestInventoryRF = replicatedStorage.RemoteFunction:WaitForChild("RequestInventory")
+local weaponChangedEvent = replicatedStorage.Events.Local.OnWeaponChanged
+local activatePotionEvent = replicatedStorage.Events:WaitForChild("ActivatePotion")
+local rewardsGainEvent = replicatedStorage.Events.RewardsGain
+
+local closeUIEvent = replicatedStorage.Events.Local.CloseUI
+
+local statIconDic = {
+	["MagicPower"] = "rbxassetid://18912037467",
+	["Cooldown"] = "rbxassetid://18911904810",
+	["Health"] = "rbxassetid://18911899045",
+	["Potion"] = "rbxassetid://97578238145265",
+}
+
+local itemIDInView = nil
+local selectedItemData = nil
+local selectedItem = nil
+local itemBtnDic = {}
+
+local playSfxEvent = replicatedStorage.Events.Local.PlaySfx
+
+local upgradeReadytweenInfo = TweenInfo.new(.5, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1, true, 0)
+local upgradeReadyTween = tweenService:Create(upgradeBtn.UpgradeIcon, upgradeReadytweenInfo, {
+	Position = UDim2.new(0.784, 0, 0, 0)
+})
+
+local rarityTextEffect = { currentRarity = "", Effects = {}}
+local currentRarityTextEffect = ""
+
+local function ApplyRarityEffect(rarity)
+	
+	if 	rarityTextEffect.currentRarity == rarity then
+		return 
+	else
+		if rarityTextEffect.Effects[rarityTextEffect.currentRarity] then
+			for i, effect in pairs(rarityTextEffect.Effects[rarityTextEffect.currentRarity]) do
+				effect:Pause()
+			end
+		end
+	end	
+	
+	if rarityTextEffect.Effects[rarity] then
+		
+		for i, effect in pairs(rarityTextEffect.Effects[rarity]) do
+			effect:Resume()
+		end
+
+	else
+		rarityTextEffect.Effects[rarity] = {
+			easyVisuals.new(itemPreviewFrame.Showcase.RarityText, "WaveStroke",1, 5, false, toolUtility.Rarities[rarity].Color),
+			easyVisuals.new(itemPreviewFrame.Showcase.RarityText, "Shine",1, 5, false, toolUtility.Rarities[rarity].Color),
+			easyVisuals.new(itemPreviewFrame.Showcase.NameText, "Shine",1, 5, false, toolUtility.Rarities[rarity].Color),
+			easyVisuals.new(itemPreviewFrame, "ShineOutline", 75, 10, false,toolUtility.Rarities[rarity].Color),
+		}
+
+	end	
+	
+	rarityTextEffect.currentRarity = rarity
+	
+end
+
+-- Close Inventory
+closeBtn.MouseButton1Click:Connect(function()
+	closeUIEvent:Fire("Inventory")
+end)
+
+local function SelectBtnWithID(id)
+	for i, btn in pairs(itemBtnDic) do
+		if i == id then
+			btn.Select.Visible = true
+	
+		else
+			btn.Select.Visible = false
+		end
+	end
+end
+
+local function GetLenght(category)
+	if category == "Weapon" then
+		return	toolUtility.GetDictionaryLength(inventoryData.Weapons)
+	elseif category == "Hat" then
+		return	toolUtility.GetDictionaryLength(inventoryData.Hats) 
+	elseif category == "Aura" then
+		return	toolUtility.GetDictionaryLength(inventoryData.Auras) 
+	elseif category == "Potion" then
+		return	toolUtility.GetDictionaryLength(inventoryData.Potions) 
+	end
+end
+
+local function GetItemObject(id,itemType)
+	local item = nil
+	if itemType == "Weapon" then
+		item = toolUtility.GetWeaponByID(id)
+	elseif itemType == "Hat" then
+		item = toolUtility.GetHatByID(id)
+	elseif itemType == "Aura" then
+		item = toolUtility.GetAuraByID(id)
+	elseif itemType == "Potion" then
+		item = toolUtility.GetPotionByID(id)
+	end
+	return item
+end
+
+local function GetItemData(id,itemType)
+	local itemData = nil
+	
+	if itemType == "Weapon" then
+		itemData = inventoryData.Weapons[id]
+	elseif itemType == "Hat" then
+		itemData = inventoryData.Hats[id]
+	elseif itemType == "Aura" then
+		itemData = inventoryData.Auras[id]
+	elseif itemType == "Potion" then
+		itemData = inventoryData.Potions[id]
+	end
+	return itemData
+end
+
+local function IsEquipped(item , itemType : string)
+	local isEquipped = false
+	if itemType == "Weapon" then
+		isEquipped = playerStats.EquippedWeapon.Value == item:GetAttribute("ID")
+	elseif itemType == "Hat" then
+		isEquipped = playerStats.EquippedHat.Value == item:GetAttribute("ID")
+	elseif itemType == "Aura" then
+		isEquipped = playerStats.EquippedAura.Value == item:GetAttribute("ID")
+	end
+	return isEquipped
+end
+
+local function ConvertItemDicToSortedTable(itemDataDic, itemType)
+	local sortedTable = {}
+	for id in pairs(itemDataDic) do
+		table.insert(sortedTable, {ID = id , Data = itemDataDic[id]})
+	end
+
+	table.sort(sortedTable, function(a,b)
+		local itemA = GetItemObject(a.ID,itemType)
+		local itemB =  GetItemObject(b.ID,itemType)
+		
+		if itemType == "Aura" or  itemType == "Potion" then
+			return toolUtility.GetItemRaityIndex(itemA) > toolUtility.GetItemRaityIndex(itemB)
+		else
+			return itemA:GetAttribute("Cost") > itemB:GetAttribute("Cost")
+		end
+
+	end)
+
+	return sortedTable
+end
+
+local function DisplayStat(id, value, increase :  number | string, preffix : string, suffix : string)
+	
+	if value == 0 then
+		return
+	end
+	
+	local statUI = statTemplate:Clone()
+	statUI.Parent = itemStatFrame
+	statUI.Icon.Image = statIconDic[id]
+	statUI.ItemInfo.Text = (preffix or "") .. gameUtility.Comma_value(value) .. (suffix or "")
+	
+	if value == increase or increase == 0 then
+		statUI.IncreaseInfo.Text = ""
+	else
+		statUI.IncreaseInfo.Text = " ➡️ " .. (preffix or "") .. gameUtility.Comma_value(increase) .. (suffix or "")
+	end
+
+end
+
+local function DisplayItemStats(item , itemType)
+	
+	for i, itemBtn in pairs(itemStatFrame:GetChildren()) do
+		if not itemBtn:IsA("UIListLayout") then
+			itemBtn:Destroy()
+		end
+	end
+	
+	local itemData = selectedItemData
+	
+	if itemType == "Potion" then
+		
+		local coinMulti = item:GetAttribute("CoinMultiplier")
+		local expMulti = item:GetAttribute("EXPMultiplier")
+		local info = ""
+		
+		if coinMulti  > 0 and expMulti > 0 then
+			info = "x" .. coinMulti .. " EXP & Coins for 1 hour"
+		elseif coinMulti  > 0 then
+			info = "x" .. coinMulti .. " Coins for " ..  item:GetAttribute("Duration") / 60 .. " Minutes"
+		elseif expMulti > 0 then		
+			info = "x" .. expMulti .. " EXP for " ..  item:GetAttribute("Duration") / 60 .. " Minutes"
+		end
+		
+		DisplayStat("Potion", info, 0)
+		return
+	end
+	
+	local maxlevel = toolUtility.GetItemMaxLevel(item)	
+	local nextLevel = itemData.Level + 1
+
+	
+	if itemType == "Weapon" then
+		
+		local nextMagicPower = 0
+		local nextCooldown = 0
+		
+		if nextLevel > maxlevel then
+			nextMagicPower = 0
+			nextCooldown = 0
+		else
+			nextMagicPower =  toolUtility.GetLevelValue(item:GetAttribute("MagicPower"), nextLevel, maxlevel, true)
+			nextCooldown = toolUtility.GetLevelValueFlip(item:GetAttribute("Cooldown"), nextLevel, maxlevel)
+		end
+
+		DisplayStat("MagicPower", toolUtility.GetLevelValue(item:GetAttribute("MagicPower"), itemData.Level, maxlevel, true), nextMagicPower)
+		
+		DisplayStat("Cooldown", toolUtility.GetLevelValueFlip(item:GetAttribute("Cooldown"), itemData.Level, maxlevel) , nextCooldown ,"", "/s")
+		
+	elseif itemType == "Hat" then
+		
+		local nextHealth = 0
+		if nextLevel > maxlevel then
+			nextHealth = 0
+		else
+			nextHealth =  toolUtility.GetLevelValue(item:GetAttribute("Health"), nextLevel, maxlevel, true)
+		end
+
+		DisplayStat("Health", toolUtility.GetLevelValue(item:GetAttribute("Health"), itemData.Level, maxlevel, true), nextHealth)
+		
+	elseif itemType == "Aura" then
+		
+		local nextMagicPowerMulti = 0
+		local nextHealthMulti = 0
+
+		if nextLevel > maxlevel then
+			nextMagicPowerMulti = 0
+			nextHealthMulti = 0
+		else
+			nextMagicPowerMulti =  toolUtility.GetLevelValue(item:GetAttribute("MagicPowerIncrease"), nextLevel, maxlevel)
+			nextHealthMulti = toolUtility.GetLevelValue(item:GetAttribute("HealthIncrease"), nextLevel, maxlevel)
+		end
+
+		DisplayStat("MagicPower", toolUtility.GetLevelValue(item:GetAttribute("MagicPowerIncrease"),
+			itemData.Level, maxlevel), nextMagicPowerMulti, "+ " , " %")
+
+		DisplayStat("Health", toolUtility.GetLevelValue(item:GetAttribute("HealthIncrease"),
+			itemData.Level, maxlevel) , nextHealthMulti, "+ ",  " %")
+		
+	end
+	
+end
+
+local function DisplayItemMain(item, itemType)
+	
+	selectedItemData = GetItemData(item:GetAttribute("ID"), itemType)
+	
+	itemPreviewFrame.Showcase.NameText.Text = item:GetAttribute("Name")
+	
+	ApplyRarityEffect(item:GetAttribute("Rarity"))
+	
+	itemPreviewFrame.Showcase.RarityText.Text = item:GetAttribute("Rarity")
+	
+	itemPreviewFrame.Showcase.RarityColor.UIGradient.Color = toolUtility.Rarities[item:GetAttribute("Rarity")].ColorSequence
+	
+	itemPreviewFrame.Showcase.Icon.Image = item:GetAttribute("Icon")
+	
+	itemPreviewFrame.Equip.Visible = itemType ~= "Potion"
+	itemPreviewFrame.PotionUse.Visible = itemType == "Potion"
+	
+	if itemType == "Potion" then
+		itemPreviewFrame.Equip.AuraCount.Display.Text = "x" .. selectedItemData.Amount
+		multipleUsebtn.Visible = selectedItemData.Amount >= 5
+		return
+	else
+		itemPreviewFrame.Level.Display.Text = "Lv " .. selectedItemData.Level .. "/" ..toolUtility.GetItemMaxLevel(item)
+	end
+	
+	local upgradePrice = toolUtility.GetItemUpgardePice(item,selectedItemData.Level)
+	local canUpgrade = true
+	local isEquipped = IsEquipped(item, itemType)
+	local auraNeededForUpgrade = toolUtility.GetAuraNeededForUpgrade(item)
+	local isMaxed = selectedItemData.Level >= toolUtility.GetItemMaxLevel(item)
+	
+	if itemType == "Aura" then
+		
+		itemPreviewFrame.Equip.UpgradeBtn.UpgradeInfo.Icon.Image = toolUtility.crystalImageID
+		upgradeBtn.Background.BackgroundColor3 = Color3.fromRGB(211, 88, 0)
+		itemPreviewFrame.Equip.AuraCount.Icon.Image = item:GetAttribute("Icon")
+		itemPreviewFrame.Equip.AuraCount.Display.Text = selectedItemData.Amount .. "/" .. auraNeededForUpgrade
+		itemPreviewFrame.Equip.AuraCount.Visible = not isMaxed
+		
+		canUpgrade = player.PlayerStats.Crystal.Value >= upgradePrice 
+			and selectedItemData.Amount >= auraNeededForUpgrade
+	else
+		itemPreviewFrame.Equip.UpgradeBtn.UpgradeInfo.Icon.Image = toolUtility.coinImageID
+		upgradeBtn.Background.BackgroundColor3 = Color3.fromRGB(211, 177, 4)
+		itemPreviewFrame.Equip.AuraCount.Visible = false
+		
+		canUpgrade = player.PlayerStats.Coin.Value >= upgradePrice
+	end
+	
+	itemPreviewFrame.Equip.UpgradeBtn.UpgradeInfo.Amount.Text = gameUtility.Comma_value(upgradePrice)
+
+	if isEquipped then
+		equipBtn.EquipText.Text = "Equipped"
+		equipBtn.Background.BackgroundColor3 = Color3.fromRGB(51, 58, 97)
+		equipBtn.Interactable = false
+	else
+		equipBtn.Interactable = true
+		equipBtn.EquipText.Text = "Equip"
+		equipBtn.Background.BackgroundColor3 = Color3.fromRGB(0, 211, 0)
+	end
+	
+	upgradeBtn.Visible = not isMaxed
+	
+	itemPreviewFrame.Equip.MaxedOut.Visible = isMaxed
+	
+	if canUpgrade and not isMaxed then
+		upgradeBtn.Interactable = true
+		upgradeBtn.UpgradeIcon.Visible = true
+		upgradeReadyTween:Play()
+	else
+		upgradeBtn.Interactable = false
+		upgradeBtn.Background.BackgroundColor3 = Color3.fromRGB(51, 58, 97)
+		upgradeReadyTween:Pause()
+		upgradeBtn.UpgradeIcon.Visible = false
+	end
+
+end
+
+local function DisplayItemInView(item, itemType)
+	
+	itemIDInView = item:GetAttribute("ID")
+	
+	selectedItem = item
+	
+	DisplayItemMain(item, itemType)
+	
+	DisplayItemStats(item,itemType)
+end
+
+local function SpawnBtn(item, itemType)
+	local itemBtn = itemBtnTemplate:Clone()
+	itemBtnDic[item:GetAttribute("ID")] = itemBtn
+	itemBtn.Parent = inventoryFrame.Items.Scrolling
+	itemBtn.Rarity.UIGradient.Color = toolUtility.Rarities[item:GetAttribute("Rarity")].ColorSequence
+	itemBtn.Name = tostring(item:GetAttribute("ID"))
+	itemBtn.Icon.Image = item:GetAttribute("Icon")
+	
+	itemBtn.MouseButton1Click:Connect(function()
+		SelectBtnWithID(item:GetAttribute("ID"))
+		DisplayItemInView (item, itemType)
+	end)
+	
+	return itemBtn
+end
+
+local function DisplayItems(itemType)
+
+	local itemDataDic = {}
+
+	if itemType == "Weapon" and inventoryData.Weapons then
+		itemDataDic = inventoryData.Weapons
+	elseif itemType == "Hat" and inventoryData.Hats then
+		itemDataDic = inventoryData.Hats
+	elseif itemType == "Aura" and inventoryData.Auras then
+		itemDataDic = inventoryData.Auras
+	elseif itemType == "Potion" and inventoryData.Potions then
+		itemDataDic = inventoryData.Potions
+	end
+
+	local oneInView = false
+
+	local itemDataTable = ConvertItemDicToSortedTable(itemDataDic , itemType)
+
+	for i, itemData in pairs(itemDataTable) do
+		
+		local id = itemData.ID
+		local data = itemData.Data
+
+		local item = GetItemObject(id,itemType)
+
+		if not item then
+			warn("Item not found: ", id)
+			continue
+		end
+
+		local itemBtn = SpawnBtn(item, itemType)
+
+		local isEquipped = IsEquipped(item, itemType)
+
+		if itemType == "Weapon" then
+			itemBtn.Level.Display.Text = "Lv " .. data.Level
+			itemBtn.StackCount.Text = ""
+		elseif itemType == "Hat" then
+			itemBtn.Level.Display.Text = "Lv " .. data.Level
+			itemBtn.StackCount.Text = ""
+		elseif itemType == "Aura" then
+			itemBtn.Level.Display.Text = "Lv " .. data.Level
+			itemBtn.StackCount.Text = "x".. data.Amount
+		elseif itemType == "Potion" then
+			itemBtn.Level.Visible = false
+			itemBtn.StackCount.Text = "x".. data.Amount
+		end
+
+		itemBtn.EquippedText.Visible = isEquipped
+
+		if isEquipped then		
+			oneInView = true
+			SelectBtnWithID(id)
+			DisplayItemInView (item, itemType)
+		end
+
+	end
+
+	if not oneInView and #itemDataTable > 0 then
+		local id = itemDataTable[1].ID
+		local data = itemDataTable[1].Data
+		local item = GetItemObject(id,itemType)
+		SelectBtnWithID(id)
+		DisplayItemInView (item, itemType)
+	end
+
+end
+
+local function ToggleCategory(id)
+	
+	if currentCategory == id then
+		return
+	end
+	
+	currentCategory = id
+	
+	selectedItem = nil
+	
+	uiEffect.RemoveBtnHoverEffect(inventoryFrame.Items.Scrolling)
+	
+	for i, itemBtn in pairs(inventoryFrame.Items.Scrolling:GetChildren()) do
+		if itemBtn:IsA("ImageButton") then
+			itemBtn:Destroy()
+		end
+	end
+	
+	inventoryFrame.Items.Scrolling.CanvasPosition = Vector2.new(0,0)
+
+	itemBtnDic = {}
+	for i, btn in pairs(itemCategoryDic) do
+		if i == id then
+			btn.BackgroundColor3 = Color3.fromRGB(123, 138, 235)
+			btn.Select.Visible = true
+
+		else
+			btn.BackgroundColor3 = Color3.fromRGB(51, 58, 97)
+			btn.Select.Visible = false
+		end
+	end
+	
+	itemPreviewFrame.Visible =  GetLenght(currentCategory) > 0
+	
+	DisplayItems (currentCategory)
+	
+	uiEffect.AddBtnHoverEffect(inventoryFrame.Items.Scrolling)
+	
+end
+
+local function UpdateItemUI(itemType)
+
+	local itemDataDic = {}
+
+	if itemType == "Weapon" and inventoryData.Weapons then
+		itemDataDic = inventoryData.Weapons
+	elseif itemType == "Hat" and inventoryData.Hats then
+		itemDataDic = inventoryData.Hats
+	elseif itemType == "Aura" and inventoryData.Auras then
+		itemDataDic = inventoryData.Auras
+	elseif itemType == "Potion" and inventoryData.Potions then
+		itemDataDic = inventoryData.Potions
+	end
+
+	for id, data in pairs(itemDataDic) do
+
+		local item = GetItemObject(id,itemType)
+
+		if not item then
+			warn("Item not found: ", id, data)
+			continue
+		end
+
+		local itemBtn = itemBtnDic[id]
+		
+		if not itemBtn then
+			itemBtn = SpawnBtn(item, itemType)
+			--uiEffect.AddBtnHoverEffect(itemBtn)
+		end
+
+		local isEquipped  = false
+
+		local isEquipped = IsEquipped(item, itemType)
+
+		if itemType == "Weapon" then
+			itemBtn.Level.Display.Text = "Lv " .. data.Level
+			itemBtn.StackCount.Text = ""
+		elseif itemType == "Hat" then
+			itemBtn.Level.Display.Text = "Lv " .. data.Level
+			itemBtn.StackCount.Text = ""
+		elseif itemType == "Aura" then
+			itemBtn.Level.Display.Text = "Lv " .. data.Level
+			itemBtn.StackCount.Text = "x".. data.Amount
+		elseif itemType == "Potion" then
+			itemBtn.Level.Visible = false
+			itemBtn.StackCount.Text = "x".. data.Amount
+		end
+
+		itemBtn.EquippedText.Visible = isEquipped
+	end
+	
+	if selectedItem then
+		DisplayItemInView (selectedItem, currentCategory)
+	end
+end
+
+singleUseBtn.MouseButton1Click:Connect(function()	
+	if itemIDInView == "" then
+		return
+	end
+	
+	singleUseBtn.Interactable = false
+	multipleUsebtn.Interactable = false
+	playSfxEvent:Fire("PotionDrink")
+	activatePotionEvent:FireServer(itemIDInView, 1)	
+end)
+
+multipleUsebtn.MouseButton1Click:Connect(function()	
+	if itemIDInView == "" then
+		return
+	end
+	singleUseBtn.Interactable = false
+	multipleUsebtn.Interactable = false
+	playSfxEvent:Fire("PotionDrink")
+	activatePotionEvent:FireServer(itemIDInView,5)	
+end)
+
+activatePotionEvent.OnClientEvent:Connect(function()
+	
+	singleUseBtn.Interactable = true
+	multipleUsebtn.Interactable = true
+
+	inventoryData = requestInventoryRF:InvokeServer()
+	
+	local itemData = GetItemData(itemIDInView, currentCategory)
+	
+	if itemData then
+		UpdateItemUI(currentCategory)
+	else
+		itemIDInView = ""
+		currentCategory = ""
+		ToggleCategory("Potion")
+	end
+	
+end)
+
+
+equipBtn.MouseButton1Click:Connect(function()	
+	equipItemEvent:FireServer(itemIDInView, currentCategory)	
+end)
+
+equipItemEvent.OnClientEvent:Connect(function(itemType)
+
+	if itemType == "Weapon" then
+		local weapon  = GetItemObject(itemIDInView, itemType)
+		weaponChangedEvent:Fire(weapon)
+	elseif itemType == "Hat" then
+
+	elseif itemType == "Aura" then
+
+	end
+	
+	UpdateItemUI(currentCategory)
+end)
+
+upgradeBtn.MouseButton1Click:Connect(function()	
+	if not selectedItem then
+		return
+	end
+	
+	upgradeBtn.Interactable = false
+	
+	uiEffect.BtnStarEffect(upgradeBtn, 30)
+	uiEffect.ShakeFrame(itemPreviewFrame, 5, .5)
+	
+	local cost = toolUtility.GetItemUpgardePice(selectedItem, selectedItemData.Level)
+	
+	upgradeItemEvent:FireServer(itemIDInView, currentCategory, cost)	
+
+	playSfxEvent:Fire("Upgrade")
+	screenShake.BigShake(player.Character, .25)
+end)
+
+upgradeItemEvent.OnClientEvent:Connect(function(itemType)
+	
+	upgradeBtn.Interactable = true
+
+	if itemType == "Weapon" then
+
+	elseif itemType == "Hat" then
+
+	elseif itemType == "Aura" then
+
+	end
+	
+	inventoryData = requestInventoryRF:InvokeServer()
+	UpdateItemUI(currentCategory)
+end)
+
+for category, btn in pairs(itemCategoryDic) do
+	btn.MouseButton1Click:Connect(function()
+		ToggleCategory(category)
+	end)
+end
+
+local function DisplayTotalStats()	
+	
+	inventoryData = requestInventoryRF:InvokeServer()
+	
+	inventoryFrame.Stats.TotalWeapon.Display.Text =GetLenght("Weapon") .. "/" .. 
+		#toolUtility.GetAllWeapons()
+	
+	inventoryFrame.Stats.TotalHats.Display.Text = GetLenght("Hat") .. "/" ..
+		#toolUtility.GetAllHats()
+	
+	inventoryFrame.Stats.TotalAura.Display.Text = GetLenght("Aura") .. "/" ..
+		#toolUtility.GetAllAuraObject()
+end
+
+rewardsGainEvent.OnClientEvent:Connect(function(fullScreen, rewards)
+	for i, reward in pairs(rewards) do
+		if reward.RewardType == currentCategory and inventoryFrame.Visible then
+			inventoryData = requestInventoryRF:InvokeServer()
+			UpdateItemUI(currentCategory)
+			return
+		end
+	end
+end)
+
+inventoryFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+
+	if inventoryFrame.Visible then
+		DisplayTotalStats()
+		ToggleCategory("Weapon")
+	else
+		currentCategory = ""
+	end
+end)

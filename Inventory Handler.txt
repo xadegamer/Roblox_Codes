@@ -1,0 +1,79 @@
+local replicatedStorage = game:GetService("ReplicatedStorage")
+local purchaseItemEvent = replicatedStorage.Events:WaitForChild("PurchaseItem")
+local equipItemEvent = 	replicatedStorage.Events:WaitForChild("EquipItem")
+local upgradeItemEvent = replicatedStorage.Events:WaitForChild("UpgradeItem")
+local requestInventoryRF = replicatedStorage.RemoteFunction:WaitForChild("RequestInventory")
+local toolUtility = require(replicatedStorage:WaitForChild("ToolUtility"))
+local inventoryManager =  require(game.ServerScriptService:WaitForChild("InventoryManager"))
+local rewardManager = require(game.ServerScriptService:WaitForChild("RewardManager"))
+
+local function OnItemPurchased(player, itemID, cost, itemType)
+	
+	local reward  = {
+		RewardID = itemID,
+		RewardType = itemType,
+		Amount = 1
+	}
+	
+	rewardManager.ProcessRewards(player, false, reward)
+	
+	player.PlayerStats.Coin.Value -= cost
+
+	purchaseItemEvent:FireClient(player, itemType)
+end
+
+local function OnItemEquipped(player, itemID, itemType)
+	if itemType == "Weapon" then
+		inventoryManager.EquipWeapon(player, itemID)
+	elseif itemType == "Hat" then
+		inventoryManager.EquipHat(player, itemID)
+	elseif itemType == "Aura" then
+		inventoryManager.EquipAura(player,itemID)
+	end
+	
+	inventoryManager.UpdatePlayerStats(player)
+
+	equipItemEvent:FireClient(player, itemType)
+end
+
+local function OnItemUpgraded(player, itemID, itemType, cost)
+	
+	if itemType == "Weapon" then
+
+		inventoryManager.UpgradeWeapon(player, itemID)
+		player.PlayerStats.Coin.Value -= cost
+
+	elseif itemType == "Hat" then
+
+		inventoryManager.UpgradeHat(player, itemID)
+		player.PlayerStats.Coin.Value -= cost
+
+	elseif itemType == "Aura" then
+
+		inventoryManager.UpgradeAura(player, itemID)
+		
+		local item = toolUtility.GetAuraByID(itemID)
+		local auraNeededForUpgrade = toolUtility.GetAuraNeededForUpgrade(item)
+		inventoryManager.RemoveAura(player, itemID, auraNeededForUpgrade)
+		
+		player.PlayerStats.Crystal.Value -= cost
+
+	end
+	
+	inventoryManager.UpdatePlayerStats(player)
+	
+	upgradeItemEvent:FireClient(player, itemType)
+
+end
+
+local function GetInventoryData(player)
+	return inventoryManager.GetPlayerItems(player)
+end
+
+purchaseItemEvent.OnServerEvent:Connect(OnItemPurchased)
+
+equipItemEvent.OnServerEvent:Connect(OnItemEquipped)
+
+upgradeItemEvent.OnServerEvent:Connect(OnItemUpgraded)
+
+requestInventoryRF.OnServerInvoke = GetInventoryData

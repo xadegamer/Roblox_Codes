@@ -1,0 +1,383 @@
+
+local InventoryManager = {}
+
+local replicatedStorage = game:GetService("ReplicatedStorage")
+local toolUtility = require(replicatedStorage:WaitForChild("ToolUtility"))
+local serverScripts = game:GetService("ServerScriptService")
+local profileManager = require(serverScripts.PlayerProfile.ProfileManager)
+local gameUtility =  require(replicatedStorage.GameUtility)
+
+InventoryManager.AddDefaultItems = function(player)	
+	
+	--InventoryManager.GivePlayerAllAura(player, 100)
+
+	if not profileManager.Profiles[player].Data.Inventory.Weapons then
+		InventoryManager.AddWeapon(player, "WoodenWand")
+		InventoryManager.AddHat(player, "LeatherHat")
+		player.PlayerStats.EquippedWeapon.Value = "WoodenWand"
+		player.PlayerStats.EquippedHat.Value = "LeatherHat"
+		--InventoryManager.GivePlayerAllAura(player, 100)
+	end
+end
+
+InventoryManager.TryCreateInventory = function(player)	
+	
+	if not profileManager.Profiles[player] then
+		return
+	end
+	
+	if not profileManager.Profiles[player].Data.Inventory.Weapons then
+		profileManager.Profiles[player].Data.Inventory.Weapons = {}
+		profileManager.Profiles[player].Data.Inventory.Hats = {}
+		profileManager.Profiles[player].Data.Inventory.Auras = {}
+		profileManager.Profiles[player].Data.Inventory.Potions = {}
+	end
+
+end
+
+InventoryManager.DataExists = function(tableData, id)
+	for i,entry in pairs(tableData) do
+		if entry.ID == id then
+			return entry
+		end
+	end
+	return nil
+end
+
+InventoryManager.EquipItems = function(player)
+	player.Character.Humanoid:RemoveAccessories()	
+
+	InventoryManager.EquipWeapon(player, player.PlayerStats.EquippedWeapon.Value)
+	InventoryManager.EquipHat(player, player.PlayerStats.EquippedHat.Value)
+	InventoryManager.EquipAura(player, player.PlayerStats.EquippedAura.Value)
+	
+	InventoryManager.UpdatePlayerStats(player)
+	
+	local character = player.Character
+	if character then
+		local humanoid = character:FindFirstChild("Humanoid")
+		humanoid.Health = humanoid.MaxHealth
+	end		
+end
+
+--Adding
+
+InventoryManager.AddWeapon = function(player, weaponID)
+	
+	InventoryManager.TryCreateInventory(player)
+	if not profileManager.Profiles[player] then
+		return
+	end
+
+	local weapon = {
+		["Level"] = 1,
+	}
+	
+	profileManager.Profiles[player].Data.Inventory.Weapons[weaponID] = weapon
+end
+
+InventoryManager.AddHat = function(player, hatID)
+	
+	InventoryManager.TryCreateInventory(player)
+	if not profileManager.Profiles[player] then
+		return
+	end
+	
+	local hat = {
+		["Level"] = 1,
+	}
+	
+	profileManager.Profiles[player].Data.Inventory.Hats[hatID] = hat
+end
+
+InventoryManager.AddAura = function(player, auraID, amount)
+	
+	InventoryManager.TryCreateInventory(player)
+	if not profileManager.Profiles[player] then
+		return
+	end
+	
+	if not 	profileManager.Profiles[player].Data.Inventory.Auras[auraID] then
+		
+		local aura = {
+			["Level"] = 1,
+			["Amount"] = amount,
+		}
+		
+		profileManager.Profiles[player].Data.Inventory.Auras[auraID] = aura
+	else
+		profileManager.Profiles[player].Data.Inventory.Auras[auraID].Amount += amount
+	end	
+end
+
+InventoryManager.AddPotion = function(player, potionID, amount)
+	
+	InventoryManager.TryCreateInventory(player)
+	if not profileManager.Profiles[player] then
+		return
+	end
+
+	if not 	profileManager.Profiles[player].Data.Inventory.Potions[potionID] then
+
+		local aura = {
+			["Amount"] = amount,
+		}
+
+		profileManager.Profiles[player].Data.Inventory.Potions[potionID] = aura
+	else
+		profileManager.Profiles[player].Data.Inventory.Potions[potionID].Amount += amount
+	end	
+end
+
+-- Removing
+
+InventoryManager.RemoveWeapon = function(player, weaponID)
+	
+	InventoryManager.TryCreateInventory(player)
+	if not profileManager.Profiles[player] then
+		return
+	end
+	
+
+	profileManager.Profiles[player].Data.Inventory.Weapons[weaponID] = nil
+end
+
+InventoryManager.RemoveHat = function(player, hatID)
+	
+	InventoryManager.TryCreateInventory(player)
+	if not profileManager.Profiles[player] then
+		return
+	end
+	profileManager.Profiles[player].Data.Inventory.Hats[hatID] = nil
+end
+
+InventoryManager.RemoveAura = function(player, auraID, amount)
+	
+	InventoryManager.TryCreateInventory(player)
+	if not profileManager.Profiles[player] then
+		return
+	end
+	
+	if 	profileManager.Profiles[player].Data.Inventory.Auras[auraID] then
+		if 	profileManager.Profiles[player].Data.Inventory.Auras[auraID].Amount >= amount then
+			profileManager.Profiles[player].Data.Inventory.Auras[auraID].Amount -= amount
+			
+			if 	profileManager.Profiles[player].Data.Inventory.Auras[auraID].Amount <= 0 then
+				profileManager.Profiles[player].Data.Inventory.Auras[auraID].Amount = 1
+			end
+		end
+	end
+end
+
+InventoryManager.RemovePotion = function(player, potionID, amount)
+	
+	InventoryManager.TryCreateInventory(player)
+	if not profileManager.Profiles[player] then
+		return
+	end
+
+	if 	profileManager.Profiles[player].Data.Inventory.Potions[potionID] then
+		if 	profileManager.Profiles[player].Data.Inventory.Potions[potionID].Amount >= amount then
+			profileManager.Profiles[player].Data.Inventory.Potions[potionID].Amount  -= amount
+
+			if 	profileManager.Profiles[player].Data.Inventory.Potions[potionID].Amount <= 0 then
+				profileManager.Profiles[player].Data.Inventory.Potions[potionID] = nil
+			end
+		end
+	end
+end
+
+-- Upgrading
+
+InventoryManager.UpgradeWeapon = function(player, weaponID, increase : number?)
+	InventoryManager.TryCreateInventory(player)
+	increase = increase or 1
+	profileManager.Profiles[player].Data.Inventory.Weapons[weaponID].Level += increase
+end
+
+InventoryManager.UpgradeHat = function(player, hatID, increase : number?)
+	InventoryManager.TryCreateInventory(player)
+	increase = increase or 1
+	profileManager.Profiles[player].Data.Inventory.Hats[hatID].Level += increase
+end
+
+InventoryManager.UpgradeAura = function(player, auraID, increase : number?)
+	InventoryManager.TryCreateInventory(player)
+	increase = increase or 1
+	profileManager.Profiles[player].Data.Inventory.Auras[auraID].Level += increase
+end
+
+-- Others
+
+InventoryManager.GetPlayerItems = function(player)
+	InventoryManager.TryCreateInventory(player)
+
+	local playerItems = {}
+	playerItems = profileManager.Profiles[player].Data.Inventory
+	return playerItems
+end
+
+InventoryManager.GivePlayerAllAura = function(player, amount)
+	InventoryManager.TryCreateInventory(player)
+
+	local allAura = toolUtility.GetAllAuraObject()
+
+	-- for loop to add all aura id
+	for i,aura in pairs(allAura) do
+		local auraID = aura:GetAttribute("ID")
+		InventoryManager.AddAura(player,auraID,amount)
+	end
+end
+
+-- Equipping
+
+InventoryManager.UpdatePlayerStats = function(player : Player , weapon : Instance?, hat : Instance? , aura : Instance?)
+	local weapon = weapon or toolUtility.GetWeaponByID(player.PlayerStats.EquippedWeapon.Value)
+	local hat = hat or toolUtility.GetHatByID(player.PlayerStats.EquippedHat.Value)
+	local aura = aura or toolUtility.GetAuraByID(player.PlayerStats.EquippedAura.Value)
+	
+	local baseMagicPower = 0
+	local baseHealth = 0
+	
+	if weapon then
+		local maxlevel = toolUtility.GetItemMaxLevel(weapon)
+		local itemData = InventoryManager.GetPlayerItems(player).Weapons[weapon:GetAttribute("ID")]
+		baseMagicPower = toolUtility.GetLevelValue(weapon:GetAttribute("MagicPower"),
+			itemData.Level, maxlevel, true)
+		
+		player.PlayerStats.Cooldown.Value = toolUtility.GetLevelValueFlip(weapon:GetAttribute("Cooldown"),
+			itemData.Level, maxlevel)
+		
+		--print("baseMagicPower", baseMagicPower)
+		--print("Cooldown", player.PlayerStats.Cooldown.Value)
+	end
+	
+	if hat then
+		local maxlevel = toolUtility.GetItemMaxLevel(hat)
+		local itemData = InventoryManager.GetPlayerItems(player).Hats[hat:GetAttribute("ID")]
+		baseHealth = toolUtility.GetLevelValue(hat:GetAttribute("Health"),
+			itemData.Level, maxlevel, true)
+		
+		--print("baseHealth", baseHealth)
+	end
+	
+	local character = player.Character
+	local humanoid = character:FindFirstChild("Humanoid")
+	if  humanoid then
+		
+		if aura then
+			local maxlevel = toolUtility.GetItemMaxLevel(aura)
+
+			local itemData = InventoryManager.GetPlayerItems(player).Auras[aura:GetAttribute("ID")]
+			
+			local magicPowerMultiplier = toolUtility.GetLevelValue(aura:GetAttribute("MagicPowerIncrease"),
+				itemData.Level, maxlevel)
+			
+			local HealthMultiplier = toolUtility.GetLevelValue(aura:GetAttribute("HealthIncrease"),
+				itemData.Level, maxlevel)
+
+			player.PlayerStats.MagicPower.Value =
+				gameUtility.IncreaseByPercentage(baseMagicPower, magicPowerMultiplier)
+			
+			humanoid.MaxHealth = 
+				gameUtility.IncreaseByPercentage(baseHealth, HealthMultiplier)
+		else
+			player.PlayerStats.MagicPower.Value = baseMagicPower
+			humanoid.MaxHealth = baseHealth
+		end
+		
+		if humanoid.Health > humanoid.MaxHealth then
+			humanoid.Health = humanoid.MaxHealth
+		end
+		
+		if not player.PlayerStats.InTower.Value then
+			humanoid.Health = humanoid.MaxHealth
+		end
+		
+		if 	player.PlayerStats.MagicPower.Value >	player.PlayerStats.HighestMagicalPower.Value then
+			player.PlayerStats.HighestMagicalPower.Value = player.PlayerStats.MagicPower.Value
+		end
+		
+		--print("MagicPower", player.PlayerStats.MagicPower.Value)
+		--print("Health", humanoid.MaxHealth)
+	end
+end
+
+InventoryManager.EquipWeapon = function(player, weaponID)
+	
+	local weapon = toolUtility.GetWeaponByID(weaponID)
+	if not weapon then 
+		print("Tool to equip is null")
+		return end
+	local character = player.Character
+	if character then
+		local humanoid = character:FindFirstChild("Humanoid")
+		if humanoid then
+
+			local toolInHand = player.Character:FindFirstChildOfClass("Tool")
+			if toolInHand then 
+				toolInHand:Destroy()
+			end
+
+			local currentWeapon = weapon:Clone()
+			currentWeapon.Parent = player.Backpack
+			humanoid:EquipTool(currentWeapon)
+
+			player.PlayerStats.EquippedWeapon.Value = currentWeapon:GetAttribute("ID")	
+		end
+	end
+end
+
+InventoryManager.EquipHat = function(player, hatID)
+	local hat = toolUtility.GetHatByID(hatID)
+	if not hat then 
+		print("hat to equip is null")
+		return end
+	local character = player.Character
+	if character then
+		local humanoid = character:FindFirstChild("Humanoid")
+		if humanoid then
+
+			local hatInHead = character:FindFirstChildOfClass("Accessory")
+			if hatInHead then
+				hatInHead:Destroy()
+			end
+
+			local currentHat = hat:Clone()
+			humanoid:AddAccessory(currentHat)
+			
+			player.PlayerStats.EquippedHat.Value = currentHat:GetAttribute("ID")
+		end
+	end
+end
+
+InventoryManager.GetEquippedAura = function (player)
+	local collectionService = game:GetService("CollectionService")
+	local upperTorso = player.Character.UpperTorso
+	for i,aura in pairs(upperTorso:GetChildren()) do
+		if collectionService:HasTag(aura, "Aura") then
+			return aura
+		end
+	end
+	return nil
+end
+
+InventoryManager.EquipAura = function(player, auraID)
+	local aura = toolUtility.GetAuraByID(auraID)
+	if not aura then
+		print("aura to equip is null")
+		return 
+	end
+	
+	local eqquipedAura = InventoryManager.GetEquippedAura(player)
+	if eqquipedAura then
+		eqquipedAura:Destroy()
+	end
+
+	local upperTorso = player.Character.UpperTorso
+	local currentAura = aura:Clone()
+	currentAura.Parent = upperTorso
+	player.PlayerStats.EquippedAura.Value = currentAura:GetAttribute("ID")
+end
+
+return InventoryManager
